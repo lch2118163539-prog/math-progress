@@ -33,25 +33,25 @@
 
 ```mermaid
 flowchart TD
-    subgraph 客户端 [用户端（手机 / 电脑浏览器）]
-        UI1[✍️ 社员填报页面 (级联下拉 / 自动匹配)]
-        UI2[📊 实时大屏看板 (进度卡片 / 预警灯)]
+    subgraph Client ["用户端（手机 / 电脑浏览器）"]
+        UI1["✍️ 社员填报页面（级联下拉 / 自动匹配）"]
+        UI2["📊 实时大屏看板（进度卡片 / 预警灯）"]
     end
 
-    subgraph 静态部署 [GitHub Pages / 免费托管]
-        Repo[GitHub 仓库: index.html]
+    subgraph Hosting ["GitHub Pages 免费托管"]
+        Repo["GitHub 仓库 index.html"]
     end
 
-    subgraph 云端数据库 [Supabase BaaS (免费 PostgreSQL)]
-        DB[(math_progress 进度流水日志表)]
-        View[view_latest_math_progress 最新进度视图]
+    subgraph CloudDB ["Supabase 免费数据库"]
+        DB[("math_progress 进度流水日志表")]
+        View["view_latest_math_progress 最新进度视图"]
     end
 
     Repo -. 一键托管 .-> UI1
     Repo -. 一键托管 .-> UI2
-    UI1 -- 提交最新进度流水 (Insert) --> DB
+    UI1 -->|"1. 提交最新进度流水"| DB
     DB --> View
-    View -- 聚合查询最新切片 (Select) --> UI2
+    View -->|"2. 聚合查询最新切片"| UI2
 ```
 
 - **前端框架**：Vue 3 (Composition API CDN)

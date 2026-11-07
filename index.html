@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>数学社 · 全校高数与数分进度实时追踪看板</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Vue 3 -->
+  <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js"></script>
+  <!-- Supabase JS -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    [v-cloak] { display: none; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen">
+  <div id="app" v-cloak class="max-w-4xl mx-auto px-4 py-6">
+
+    <!-- 顶部导航栏 -->
+    <header class="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 pb-4">
+      <div>
+        <h1 class="text-2xl font-bold text-indigo-700 flex items-center gap-2">
+          <span>📐</span> 数学社 · 高数/数分教学进度大屏
+        </h1>
+        <p class="text-xs text-slate-500 mt-1">智能适配高数A/B/C/D分级、学期划分与数学专业「数学分析」体系</p>
+      </div>
+
+      <!-- Tab 切换 -->
+      <div class="flex bg-slate-200 p-1 rounded-xl text-sm font-medium self-start sm:self-auto">
+        <button @click="currentTab = 'board'" 
+          :class="currentTab === 'board' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-600 hover:text-slate-900'"
+          class="px-4 py-1.5 rounded-lg transition duration-150">
+          📊 进度大屏
+        </button>
+        <button @click="currentTab = 'form'" 
+          :class="currentTab === 'form' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-600 hover:text-slate-900'"
+          class="px-4 py-1.5 rounded-lg transition duration-150">
+          ✍️ 我要填报
+        </button>
+      </div>
+    </header>
+
+    <!-- 选项卡 1：实时看板 -->
+    <main v-if="currentTab === 'board'" class="space-y-5">
+      <!-- 统计指标 -->
+      <div class="grid grid-cols-3 gap-3">
+        <div class="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm text-center">
+          <div class="text-xs text-slate-400">已追踪专业</div>
+          <div class="text-xl font-bold text-slate-700 mt-1">{{ progressList.length }}</div>
+        </div>
+        <div class="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm text-center">
+          <div class="text-xs text-slate-400">3天内更新</div>
+          <div class="text-xl font-bold text-emerald-600 mt-1">{{ activeCount }}</div>
+        </div>
+        <div class="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm text-center">
+          <div class="text-xs text-slate-400">待催更(&gt;7天)</div>
+          <div class="text-xl font-bold text-rose-500 mt-1">{{ delayedCount }}</div>
+        </div>
+      </div>
+
+      <!-- 快捷课程类别过滤器 -->
+      <div class="flex flex-wrap items-center gap-1.5 text-xs">
+        <span class="text-slate-400 mr-1 font-medium">课程快速筛选:</span>
+        <button v-for="cat in ['全部', '高数A', '高数B', '高数C', '高数D', '数学分析']" :key="cat"
+                @click="courseFilter = cat"
+                :class="courseFilter === cat ? 'bg-indigo-600 text-white font-medium shadow-sm' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'"
+                class="px-2.5 py-1 rounded-lg transition">
+          {{ cat }}
+        </button>
+      </div>
+
+      <!-- 搜索与刷新 -->
+      <div class="flex gap-2">
+        <div class="relative flex-1">
+          <input v-model="searchQuery" type="text" placeholder="🔍 搜索学院、专业、具体章节或上报人..." 
+                 class="w-full pl-3 pr-8 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm">
+          <button v-if="searchQuery" @click="searchQuery = ''" class="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 text-xs">✕</button>
+        </div>
+        <button @click="fetchLatestProgress" :disabled="loading" 
+                class="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-medium transition shadow-sm flex items-center gap-1 shrink-0 disabled:opacity-50">
+          <span v-if="loading">加载中...</span>
+          <span v-else>🔄 刷新</span>
+        </button>
+      </div>
+
+      <!-- 空状态 -->
+      <div v-if="filteredList.length === 0 && !loading" class="text-center py-16 bg-white rounded-2xl border border-dashed border-slate-300">
+        <p class="text-slate-400 text-sm">暂无匹配的进度记录</p>
+        <button @click="currentTab = 'form'" class="mt-3 text-xs bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-lg hover:bg-indigo-100 font-medium">
+          去上报第一条进度
+        </button>
+      </div>
+
+      <!-- 专业卡片网格 -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div v-for="item in filteredList" :key="item.id" 
+             class="bg-white rounded-2xl p-4.5 border border-slate-200 shadow-sm hover:shadow-md transition flex flex-col justify-between">
+          
+          <div>
+            <!-- 标签与时效指示灯 -->
+            <div class="flex justify-between items-start mb-2.5">
+              <div class="flex flex-wrap items-center gap-1.5">
+                <span class="text-xs bg-slate-100 text-slate-700 font-medium px-2 py-0.5 rounded-md">{{ item.college }}</span>
+                <span :class="getCourseBadgeCls(item.course_type)" class="text-xs px-2 py-0.5 rounded-md font-semibold">
+                  {{ item.course_type }}
+                </span>
+              </div>
+              <span :class="getStatusBadge(item.created_at).cls" class="text-[11px] px-2 py-0.5 rounded-full font-medium shrink-0 ml-1">
+                {{ getStatusBadge(item.created_at).text }}
+              </span>
+            </div>
+
+            <!-- 专业名称 -->
+            <h3 class="text-lg font-bold text-slate-800 mb-3">{{ item.major }}</h3>
+
+            <!-- 进度内容 -->
+            <div class="bg-indigo-50/50 rounded-xl p-3 border border-indigo-100/60 mb-3">
+              <div class="text-[11px] text-indigo-500 font-medium mb-1">最新讲课进度</div>
+              <div class="text-base font-bold text-indigo-900">{{ item.chapter }}</div>
+              <div class="text-sm font-medium text-slate-700 mt-0.5">{{ item.section }}</div>
+            </div>
+
+            <!-- 作业/备注 -->
+            <div v-if="item.homework" class="text-xs bg-amber-50 text-amber-900 border border-amber-100 rounded-xl p-2.5 mb-3 flex items-start gap-1.5">
+              <span>📌</span>
+              <span><strong>作业/备注:</strong> {{ item.homework }}</span>
+            </div>
+          </div>
+
+          <!-- 底部署名与时间 -->
+          <div class="flex justify-between items-center text-xs text-slate-400 border-t border-slate-100 pt-2.5 mt-1">
+            <span class="truncate max-w-[140px]">上报人: {{ item.reporter }}</span>
+            <span>更新于: {{ formatTime(item.created_at) }}</span>
+          </div>
+
+        </div>
+      </div>
+    </main>
+
+    <!-- 选项卡 2：填报表单 -->
+    <main v-if="currentTab === 'form'" class="bg-white p-6 sm:p-8 rounded-2xl border border-slate-200 shadow-sm max-w-lg mx-auto">
+      <div class="mb-5 pb-3 border-b border-slate-100">
+        <h2 class="text-lg font-bold text-slate-800">📝 上报最新高数/数分进度</h2>
+        <p class="text-xs text-slate-400 mt-0.5">选择学院专业后，系统将自动匹配其对应的数学课程体系与章节</p>
+      </div>
+
+      <form @submit.prevent="submitProgress" class="space-y-4 text-sm">
+        <!-- 学院选择 -->
+        <div>
+          <label class="block font-medium text-slate-700 mb-1">所属学院 <span class="text-rose-500">*</span></label>
+          <select v-model="formData.college" @change="onCollegeChange" required
+                  class="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-indigo-500 transition">
+            <option value="" disabled>请选择学院</option>
+            <option v-for="(majors, col) in collegeOptions" :key="col" :value="col">{{ col }}</option>
+          </select>
+        </div>
+
+        <!-- 专业选择 -->
+        <div>
+          <label class="block font-medium text-slate-700 mb-1">具体专业 <span class="text-rose-500">*</span></label>
+          <select v-model="formData.major" @change="onMajorChange" :disabled="!formData.college" required
+                  class="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-indigo-500 transition disabled:opacity-50">
+            <option value="" disabled>请先选择学院</option>
+            <option v-for="m in currentMajors" :key="m" :value="m">{{ m }}</option>
+          </select>
+        </div>
+
+        <!-- 课程类别（智能自适应） -->
+        <div>
+          <div class="flex justify-between items-center mb-1">
+            <label class="block font-medium text-slate-700">课程体系 <span class="text-rose-500">*</span></label>
+            <span v-if="courseRuleHint" class="text-[11px] text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded font-medium">
+              💡 {{ courseRuleHint }}
+            </span>
+          </div>
+          <select v-model="formData.course_type" @change="onCourseTypeChange" :disabled="!formData.major" required
+                  class="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-indigo-500 transition disabled:opacity-50">
+            <option value="" disabled>请选择课程与学期</option>
+            <option v-for="c in availableCourseTypes" :key="c" :value="c">{{ c }}</option>
+          </select>
+        </div>
+
+        <!-- 章节与小节级联 -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block font-medium text-slate-700 mb-1">当前章 <span class="text-rose-500">*</span></label>
+            <select v-model="formData.chapter" @change="onChapterChange" :disabled="!formData.course_type" required
+                    class="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-indigo-500 transition disabled:opacity-50">
+              <option value="" disabled>选择章节</option>
+              <option v-for="(secs, ch) in currentChaptersDict" :key="ch" :value="ch">{{ ch }}</option>
+            </select>
+          </div>
+          <div>
+            <label class="block font-medium text-slate-700 mb-1">具体小节 <span class="text-rose-500">*</span></label>
+            <select v-model="formData.section" :disabled="!formData.chapter" required
+                    class="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-indigo-500 transition disabled:opacity-50">
+              <option value="" disabled>选择小节</option>
+              <option v-for="s in currentSections" :key="s" :value="s">{{ s }}</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- 填报人 -->
+        <div>
+          <label class="block font-medium text-slate-700 mb-1">你的昵称 / 社员名 <span class="text-rose-500">*</span></label>
+          <input v-model="formData.reporter" type="text" required placeholder="例如：李同学 (数学社/信科2401)" 
+                 class="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-indigo-500 transition">
+        </div>
+
+        <!-- 备注/作业 -->
+        <div>
+          <label class="block font-medium text-slate-700 mb-1">布置的作业或备忘 (选填)</label>
+          <input v-model="formData.homework" type="text" placeholder="例如：课后习题4.2 第1、3、5题，周四前交" 
+                 class="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-indigo-500 transition">
+        </div>
+
+        <!-- 提交按钮 -->
+        <button type="submit" :disabled="submitting" 
+                class="w-full py-3 mt-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold transition shadow-md disabled:opacity-50">
+          {{ submitting ? '正在上报中...' : '🚀 确认上报，更新进度' }}
+        </button>
+      </form>
+    </main>
+
+  </div>
+
+  <script>
+    const { createApp, ref, computed, onMounted } = Vue;
+
+    // 数据库连接配置
+    const SUPABASE_URL = "https://mctksanqqultiehwvujh.supabase.co";
+    const SUPABASE_ANON_KEY = "sb_publishable_p1hE83ttPeVAJ5KOBmfa5A_kiiANB79";
+    const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    createApp({
+      setup() {
+        const currentTab = ref('board');
+        const loading = ref(false);
+        const submitting = ref(false);
+        const progressList = ref([]);
+        const searchQuery = ref('');
+        const courseFilter = ref('全部');
+
+        // 1. 学院与专业映射字典（已录入海大 13 个院系与全部专业）
+        const collegeOptions = {
+          "航海学院": ["安全工程", "海事管理", "地理信息科学", "航海技术"],
+          "轮机工程学院": ["轮机工程(海上专业)", "轮机工程(陆上专业)"],
+          "船舶电气工程学院": ["测控技术与仪器", "电气工程及其自动化", "自动化", "物联网工程", "船舶电子电气工程"],
+          "信息科学技术学院": ["智能科学与技术", "数据科学与大数据技术", "电子信息工程", "通信工程", "光电信息科学与工程", "电子信息科学与技术", "计算机科学与技术", "软件工程", "网络工程"],
+          "交通运输工程学院": ["材料科学与工程", "土木工程", "交通运输", "交通工程", "交通管理", "物流工程"],
+          "航运经济与管理学院": ["经济学", "金融工程", "国际经济与贸易", "信息管理与信息系统", "大数据管理与应用", "工商管理", "财务管理", "物流管理", "供应链管理", "电子商务", "旅游管理"],
+          "船舶与海洋工程学院": ["机械设计制造及其自动化", "能源与动力工程", "救助与打捞工程(海洋智能装备)", "船舶与海洋工程"],
+          "环境科学与工程学院": ["海洋科学", "海洋资源与环境", "环境工程"],
+          "人工智能学院": ["人工智能"],
+          "法学院": ["法学(中外合作办学)(海商法)", "法学(涉外法治方向)", "法学(中外合作办学)", "法学(国际经济法方向)", "法学(海商法方向)"],
+          "外国语学院": ["英语", "日语"],
+          "公共管理与人文艺术学院": ["政治学与行政学", "社会工作", "公共事业管理", "行政管理"],
+          "理学院": ["统计学", "数学与应用数学", "应用物理学"]
+        };
+
+        // 2. 章节体系字典：严格对标 高教社《高等数学》（同济最新第八版/第七版）与 华东师大《数学分析》（第五版）
+        const chapterDatasets = {
+          // 【高等数学(1) 及 高数D】—— 同济大学最新版《高等数学》上册（第1章-第7章）
+          "gaoshu_1": {
+            "第一章 函数与极限": [
+              "第一节 映射与函数",
+              "第二节 数列的极限",
+              "第三节 函数的极限",
+              "第四节 无穷小与无穷大",
+              "第五节 极限运算法则",
+              "第六节 极限存在准则 两个重要极限",
+              "第七节 无穷小的比较",
+              "第八节 函数的连续性与间断点",
+              "第九节 连续函数的运算与初等函数的连续性",
+              "第十节 闭区间上连续函数的性质"
+            ],
+            "第二章 导数与微分": [
+              "第一节 导数概念",
+              "第二节 函数的求导法则",
+              "第三节 高阶导数",
+              "第四节 隐函数及由参数方程确定的导数 相关变化率",
+              "第五节 函数的微分"
+            ],
+            "第三章 微分中值定理与导数应用": [
+              "第一节 微分中值定理 (罗尔/拉格朗日/柯西)",
+              "第二节 洛必达法则",
+              "第三节 泰勒公式",
+              "第四节 函数单调性与曲线凹凸性",
+              "第五节 函数的极值与最大值最小值",
+              "第六节 函数图形的描绘",
+              "第七节 曲率",
+              "第八节 方程的近似解"
+            ],
+            "第四章 不定积分": [
+              "第一节 不定积分的概念与性质",
+              "第二节 换元积分法 (第一换元/第二换元)",
+              "第三节 分部积分法",
+              "第四节 有理函数的积分",
+              "第五节 积分表的使用"
+            ],
+            "第五章 定积分": [
+              "第一节 定积分的概念与性质",
+              "第二节 微积分基本公式 (牛顿-莱布尼茨)",
+              "第三节 定积分的换元法和分部积分法",
+              "第四节 反常积分",
+              "第五节 反常积分的审敛法 Γ函数"
+            ],
+            "第六章 定积分的应用": [
+              "第一节 定积分的元素法",
+              "第二节 定积分在几何学上的应用 (面积/体积/弧长)",
+              "第三节 定积分在物理学上的应用 (变力做功/水压力/引力)"
+            ],
+            "第七章 微分方程": [
+              "第一节 微分方程的基本概念",
+              "第二节 可分离变量的微分方程",
+              "第三节 齐次方程",
+              "第四节 一阶线性微分方程",
+              "第五节 可降阶的高阶微分方程",
+              "第六节 高阶线性微分方程",
+              "第七节 常系数齐次线性微分方程",
+              "第八节 常系数非齐次线性微分方程",
+              "第九节 欧拉方程",
+              "第十节 常系数线性微分方程组解法举例"
+            ]
+          },
+          // 【高等数学(2)】—— 同济大学最新版《高等数学》下册（第8章-第12章）
+          "gaoshu_2": {
+            "第八章 向量代数与空间解析几何": [
+              "第一节 向量及其线性运算",
+              "第二节 数量积 向量积 *混合积",
+              "第三节 平面及其方程",
+              "第四节 空间直线及其方程",
+              "第五节 曲面及其方程 (母线/旋转曲面/二次曲面)",
+              "第六节 空间曲线及其方程"
+            ],
+            "第九章 多元函数微分法及其应用": [
+              "第一节 多元函数的基本概念",
+              "第二节 偏导数",
+              "第三节 全微分",
+              "第四节 多元复合函数的求导法则",
+              "第五节 隐函数的求导公式",
+              "第六节 多元函数微分学的几何应用 (空间切线/切平面)",
+              "第七节 方向导数与梯度",
+              "第八节 多元函数的极值及其求法 (条件极值/拉格朗日乘数)",
+              "第九节 二元函数的泰勒公式",
+              "第十节 最小二乘法"
+            ],
+            "第十章 重积分": [
+              "第一节 二重积分的概念与性质",
+              "第二节 二重积分的计算法 (直角坐标/极坐标)",
+              "第三节 三重积分 (直角坐标/柱面坐标/球面坐标)",
+              "第四节 重积分的应用 (质心/转动惯量/引力)",
+              "第五节 含参变量的积分"
+            ],
+            "第十一章 曲线积分与曲面积分": [
+              "第一节 对弧长的曲线积分 (第一类曲线积分)",
+              "第二节 对坐标的曲线积分 (第二类曲线积分)",
+              "第三节 格林公式及其应用 (平面曲线积分与路径无关)",
+              "第四节 对面积的曲面积分 (第一类曲面积分)",
+              "第五节 对坐标的曲面积分 (第二类曲面积分)",
+              "第六节 高斯公式 *通量与散度",
+              "第七节 斯托克斯公式 *环流量与旋度"
+            ],
+            "第十二章 无穷级数": [
+              "第一节 常数项级数的概念和性质",
+              "第二节 常数项级数的审敛法 (比较/比值/根值/交错)",
+              "第三节 幂级数 (收敛半径与收敛域)",
+              "第四节 函数展开成幂级数",
+              "第五节 函数的幂级数展开式的应用",
+              "第六节 函数项级数的一致收敛性及性质",
+              "第七节 傅里叶级数",
+              "第八节 正弦级数和余弦级数",
+              "第九节 周期为2L的周期函数的傅里叶级数"
+            ]
+          },
+          // 【数学分析(1)】—— 华东师范大学《数学分析》（第五版）上册（第1章-第10章）
+          "shufen_1": {
+            "第一章 实数集与函数": [
+              "1.1 实数及其性质",
+              "1.2 数集·确界原理",
+              "1.3 函数概念",
+              "1.4 具有某些特性的函数 (有界/单调/奇偶/周期)"
+            ],
+            "第二章 数列极限": [
+              "2.1 数列极限概念 (ε-N 定义)",
+              "2.2 收敛数列的性质 (唯一性/有界性/保号性)",
+              "2.3 数列极限存在的条件 (单调有界/柯西准则)"
+            ],
+            "第三章 函数极限": [
+              "3.1 函数极限概念 (ε-δ / ε-X 定义)",
+              "3.2 函数极限的性质",
+              "3.3 函数极限存在的条件 (海涅定理/柯西准则)",
+              "3.4 两个重要极限",
+              "3.5 无穷小量与无穷大量 (阶的比较/等价无穷小)"
+            ],
+            "第四章 函数的连续性": [
+              "4.1 连续性概念与间断点分类",
+              "4.2 连续函数的性质 (局部性质/闭区间上连续函数性质)",
+              "4.3 初等函数的连续性与一致连续性"
+            ],
+            "第五章 导数和微分": [
+              "5.1 导数的概念与几何意义",
+              "5.2 求导法则与反函数求导",
+              "5.3 参变量函数的导数",
+              "5.4 高阶导数与莱布尼茨公式",
+              "5.5 微分概念、运算法则与高阶微分"
+            ],
+            "第六章 微分中值定理及其应用": [
+              "6.1 拉格朗日中值定理和函数的单调性",
+              "6.2 柯西中值定理和不定式极限 (洛必达法则)",
+              "6.3 泰勒公式 (带佩亚诺余项/拉格朗日余项)",
+              "6.4 函数的极值与最大值最小值",
+              "6.5 函数的凸性与拐点",
+              "6.6 函数图形的讨论"
+            ],
+            "第七章 实数的完备性": [
+              "7.1 关于实数集完备性的基本定理 (区间套/致密性/有限覆盖等六大定理)",
+              "7.2 闭区间上连续函数性质的证明"
+            ],
+            "第八章 不定积分": [
+              "8.1 不定积分概念与基本积分公式",
+              "8.2 换元积分法与分部积分法",
+              "8.3 有理函数和可化为有理函数的不定积分"
+            ],
+            "第九章 定积分": [
+              "9.1 定积分概念 (黎曼和与达布上和下和)",
+              "9.2 牛顿-莱布尼茨公式",
+              "9.3 可积条件 (必要条件与充要条件/可积函数类)",
+              "9.4 定积分的性质与积分中值定理",
+              "9.5 微积分学基本定理·定积分的分部积分法和换元法"
+            ],
+            "第十章 定积分的应用": [
+              "10.1 平面图形的面积",
+              "10.2 由平行截面面积求体积",
+              "10.3 平面曲线的弧长与曲率",
+              "10.4 旋转曲面的面积",
+              "10.5 定积分在物理中的应用"
+            ]
+          },
+          // 【数学分析(2)】—— 华东师范大学《数学分析》（第五版）反常积分、级数与多元初阶（第11章-第16章）
+          "shufen_2": {
+            "第十一章 反常积分": [
+              "11.1 反常积分概念 (无穷积分/瑕积分)",
+              "11.2 无穷积分的性质与收敛判别 (比较法/柯西准则/阿贝尔/狄利克雷)",
+              "11.3 瑕积分的性质与收敛判别"
+            ],
+            "第十二章 数项级数": [
+              "12.1 级数的敛散性与柯西收敛准则",
+              "12.2 正项级数审敛法 (达朗贝尔/柯西根值/积分判别法)",
+              "12.3 一般项级数 (绝对收敛/条件收敛/交错级数莱布尼茨法/阿贝尔与狄利克雷判别法)"
+            ],
+            "第十三章 函数列与函数项级数": [
+              "13.1 一致收敛性概念与魏尔斯特拉斯判别法",
+              "13.2 一致收敛函数列/函数项级数的性质 (连续性/逐项可微/逐项可积)"
+            ],
+            "第十四章 幂级数": [
+              "14.1 幂级数 (阿贝尔第一定理/收敛半径与区间)",
+              "14.2 幂级数的性质与逐项微积分",
+              "14.3 初等函数的幂级数展开 (泰勒展开)"
+            ],
+            "第十五章 傅里叶级数": [
+              "15.1 傅里叶级数与三角函数正交系",
+              "15.2 正弦级数与余弦级数",
+              "15.3 以2L为周期的傅里叶级数与狄利克雷收敛定理"
+            ],
+            "第十六章 多元函数的极限与连续": [
+              "16.1 平面点集与多元函数 (欧氏空间R^n拓扑概念)",
+              "16.2 二元函数的极限与累次极限",
+              "16.3 二元函数的连续性与闭区域上有界闭集性质"
+            ]
+          },
+          // 【数学分析(3)】—— 华东师范大学《数学分析》（第五版）下册多元微积分进阶（第17章-第22章）
+          "shufen_3": {
+            "第十七章 多元函数微分学": [
+              "17.1 可微性与全微分",
+              "17.2 复合函数微分法与高阶偏导数",
+              "17.3 方向导数与梯度",
+              "17.4 多元函数的泰勒公式与无条件极值"
+            ],
+            "第十八章 隐函数定理及其应用": [
+              "18.1 隐函数存在唯一定理",
+              "18.2 隐函数组与反函数组 (逆映射定理)",
+              "18.3 几何应用 (空间曲线与曲面的切线切平面)",
+              "18.4 条件极值与拉格朗日乘数法"
+            ],
+            "第十九章 含参量积分": [
+              "19.1 含参量常义积分 (连续性/积分号下求导/交换积分次序)",
+              "19.2 含参量反常积分的一致收敛性及审敛法",
+              "19.3 欧拉积分 (Γ函数与Β函数及其性质)"
+            ],
+            "第二十章 重积分": [
+              "20.1 二重积分概念与性质",
+              "20.2 二重积分计算 (直角坐标/极坐标及一般变量代换与雅可比式)",
+              "20.3 三重积分 (柱面/球面坐标计算)",
+              "20.4 重积分的应用与反常重积分"
+            ],
+            "第二十一章 曲线积分": [
+              "21.1 第一型曲线积分 (对弧长)",
+              "21.2 第二型曲线积分 (对坐标)",
+              "21.3 格林公式与曲线积分与路径无关的四个等价条件"
+            ],
+            "第二十二章 曲面积分": [
+              "22.1 第一型曲面积分 (对面积)",
+              "22.2 第二型曲面积分 (对坐标)",
+              "22.3 高斯公式与散度定理",
+              "22.4 斯托克斯公式与旋度环量定理"
+            ]
+          }
+        };
+
+        const formData = ref({
+          college: '',
+          major: '',
+          course_type: '',
+          chapter: '',
+          section: '',
+          reporter: '',
+          homework: ''
+        });
+
+        const currentMajors = computed(() => collegeOptions[formData.value.college] || []);
+
+        // 3. 核心业务规则：根据学院专业，智能给出适用的课程类别
+        const availableCourseTypes = computed(() => {
+          const col = formData.value.college;
+          const maj = formData.value.major;
+          if (!col || !maj) return [];
+
+          // 规则 1：理学院数学专业（统计学、数学与应用数学）学数学分析
+          if (col === "理学院" && (maj === "数学与应用数学" || maj === "统计学")) {
+            return ["数学分析(1)", "数学分析(2)", "数学分析(3)"];
+          }
+          // 规则 2：轮机工程学院，海上高数B，陆上高数A
+          if (col === "轮机工程学院") {
+            if (maj.includes("海上")) {
+              return ["高等数学 B(1)", "高等数学 B(2)"];
+            } else {
+              return ["高等数学 A(1)", "高等数学 A(2)"];
+            }
+          }
+          // 规则 3：航海学院，AB都有
+          if (col === "航海学院") {
+            return ["高等数学 A(1)", "高等数学 A(2)", "高等数学 B(1)", "高等数学 B(2)"];
+          }
+          // 规则 4：外国语学院和法学院，学高数D（单学期，无1、2分期）
+          if (col === "外国语学院" || col === "法学院") {
+            return ["高等数学 D"];
+          }
+          // 规则 5：公共管理与人文艺术学院，学高数C
+          if (col === "公共管理与人文艺术学院") {
+            return ["高等数学 C(1)", "高等数学 C(2)"];
+          }
+          // 规则 6：其他未提及的专业，全部学高数A
+          return ["高等数学 A(1)", "高等数学 A(2)"];
+        });
+
+        // 课程规则友好提示文字
+        const courseRuleHint = computed(() => {
+          const col = formData.value.college;
+          const maj = formData.value.major;
+          if (!col || !maj) return '';
+          if (col === "理学院" && (maj === "数学与应用数学" || maj === "统计学")) return "数学专业 · 数学分析体系";
+          if (col === "外国语学院" || col === "法学院") return "全学年单期 · 高等数学 D";
+          if (col === "轮机工程学院" && maj.includes("海上")) return "海上专业 · 高等数学 B";
+          if (col === "公共管理与人文艺术学院") return "文管类 · 高等数学 C";
+          return "理工通用 · 高等数学 A";
+        });
+
+        // 4. 根据当前选中的课程类别，智能匹配对应的章节字典
+        const currentChaptersDict = computed(() => {
+          const c = formData.value.course_type;
+          if (!c) return {};
+          if (c.includes("数学分析(1)")) return chapterDatasets["shufen_1"];
+          if (c.includes("数学分析(2)")) return chapterDatasets["shufen_2"];
+          if (c.includes("数学分析(3)")) return chapterDatasets["shufen_3"];
+          if (c.includes("(2)")) return chapterDatasets["gaoshu_2"];
+          // 默认高数(1)以及高数D
+          return chapterDatasets["gaoshu_1"];
+        });
+
+        const currentSections = computed(() => currentChaptersDict.value[formData.value.chapter] || []);
+
+        const onCollegeChange = () => {
+          formData.value.major = '';
+          formData.value.course_type = '';
+          formData.value.chapter = '';
+          formData.value.section = '';
+        };
+
+        const onMajorChange = () => {
+          const courses = availableCourseTypes.value;
+          // 自动默认选中推荐的第一门课程（例如：秋季学期默认选中 (1) 或 D）
+          formData.value.course_type = courses.length > 0 ? courses[0] : '';
+          formData.value.chapter = '';
+          formData.value.section = '';
+        };
+
+        const onCourseTypeChange = () => {
+          formData.value.chapter = '';
+          formData.value.section = '';
+        };
+
+        const onChapterChange = () => {
+          formData.value.section = '';
+        };
+
+        // 计算天数差
+        const getDaysAgo = (dateStr) => {
+          if (!dateStr) return 0;
+          const diff = Date.now() - new Date(dateStr).getTime();
+          return Math.max(0, Math.floor(diff / (1000 * 60 * 60 * 24)));
+        };
+
+        const activeCount = computed(() => {
+          return progressList.value.filter(item => getDaysAgo(item.created_at) <= 3).length;
+        });
+
+        const delayedCount = computed(() => {
+          return progressList.value.filter(item => getDaysAgo(item.created_at) > 7).length;
+        });
+
+        // 拉取最新一条进度
+        const fetchLatestProgress = async () => {
+          loading.value = true;
+          try {
+            const { data, error } = await supabaseClient
+              .from('view_latest_math_progress')
+              .select('*')
+              .order('created_at', { ascending: false });
+            if (error) throw error;
+            progressList.value = data || [];
+          } catch (err) {
+            console.error("拉取失败:", err);
+          } finally {
+            loading.value = false;
+          }
+        };
+
+        // 提交进度
+        const submitProgress = async () => {
+          submitting.value = true;
+          try {
+            const { error } = await supabaseClient.from('math_progress').insert([formData.value]);
+            if (error) throw error;
+            alert("🎉 上报成功！该专业最新教学进度已刷新！");
+            formData.value.homework = '';
+            currentTab.value = 'board';
+            await fetchLatestProgress();
+          } catch (err) {
+            console.error("提交失败:", err);
+            alert("提交失败，请重试！");
+          } finally {
+            submitting.value = false;
+          }
+        };
+
+        // 搜索与标签组合过滤
+        const filteredList = computed(() => {
+          let list = progressList.value;
+
+          // 类别快捷筛选
+          if (courseFilter.value !== '全部') {
+            list = list.filter(item => {
+              if (courseFilter.value === '高数A') return item.course_type.includes('高等数学 A');
+              if (courseFilter.value === '高数B') return item.course_type.includes('高等数学 B');
+              if (courseFilter.value === '高数C') return item.course_type.includes('高等数学 C');
+              if (courseFilter.value === '高数D') return item.course_type.includes('高等数学 D');
+              if (courseFilter.value === '数学分析') return item.course_type.includes('数学分析');
+              return true;
+            });
+          }
+
+          // 关键字搜索
+          if (!searchQuery.value) return list;
+          const q = searchQuery.value.toLowerCase().trim();
+          return list.filter(item => 
+            (item.college && item.college.toLowerCase().includes(q)) ||
+            (item.major && item.major.toLowerCase().includes(q)) ||
+            (item.course_type && item.course_type.toLowerCase().includes(q)) ||
+            (item.chapter && item.chapter.toLowerCase().includes(q)) ||
+            (item.section && item.section.toLowerCase().includes(q)) ||
+            (item.reporter && item.reporter.toLowerCase().includes(q))
+          );
+        });
+
+        // 课程徽标颜色配置
+        const getCourseBadgeCls = (courseType) => {
+          if (!courseType) return 'bg-slate-100 text-slate-700';
+          if (courseType.includes('数学分析')) return 'bg-emerald-50 text-emerald-700 border border-emerald-200';
+          if (courseType.includes('高等数学 A')) return 'bg-blue-50 text-blue-700 border border-blue-200';
+          if (courseType.includes('高等数学 B')) return 'bg-indigo-50 text-indigo-700 border border-indigo-200';
+          if (courseType.includes('高等数学 C')) return 'bg-purple-50 text-purple-700 border border-purple-200';
+          if (courseType.includes('高等数学 D')) return 'bg-amber-50 text-amber-700 border border-amber-200';
+          return 'bg-slate-100 text-slate-700';
+        };
+
+        // 时效指示灯
+        const getStatusBadge = (dateStr) => {
+          const days = getDaysAgo(dateStr);
+          if (days <= 3) return { text: '🟢 活跃更新', cls: 'bg-emerald-50 text-emerald-700 border border-emerald-200' };
+          if (days <= 7) return { text: '🟡 本周内', cls: 'bg-amber-50 text-amber-700 border border-amber-200' };
+          return { text: `🔴 延期${days}天`, cls: 'bg-rose-50 text-rose-700 border border-rose-200' };
+        };
+
+        // 格式化时间
+        const formatTime = (dateStr) => {
+          if (!dateStr) return '';
+          const d = new Date(dateStr);
+          return `${d.getMonth()+1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+        };
+
+        onMounted(() => {
+          fetchLatestProgress();
+        });
+
+        return {
+          currentTab, loading, submitting, progressList, searchQuery, courseFilter,
+          collegeOptions, formData, currentMajors, availableCourseTypes, courseRuleHint,
+          currentChaptersDict, currentSections, activeCount, delayedCount,
+          onCollegeChange, onMajorChange, onCourseTypeChange, onChapterChange,
+          fetchLatestProgress, submitProgress, filteredList, getCourseBadgeCls,
+          getDaysAgo, getStatusBadge, formatTime
+        };
+      }
+    }).mount('#app');
+  </script>
+</body>
+</html>

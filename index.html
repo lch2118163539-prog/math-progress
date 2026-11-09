@@ -117,8 +117,13 @@
             <!-- 进度内容 -->
             <div class="bg-indigo-50/50 rounded-xl p-3 border border-indigo-100/60 mb-3">
               <div class="text-[11px] text-indigo-500 font-medium mb-1">最新讲课进度</div>
-              <div class="text-base font-bold text-indigo-900">{{ item.chapter }}</div>
-              <div class="text-sm font-medium text-slate-700 mt-0.5">{{ item.section }}</div>
+              <template v-if="item.chapter && item.chapter.trim()">
+                <div class="text-base font-bold text-indigo-900">{{ item.chapter }}</div>
+                <div class="text-sm font-medium text-slate-700 mt-0.5">{{ item.section }}</div>
+              </template>
+              <template v-else>
+                <div class="text-sm text-slate-400 italic py-0.5">⚠️ 该记录未选择具体章节，请重新上报</div>
+              </template>
             </div>
 
             <!-- 作业/备注 -->
@@ -688,6 +693,32 @@
 
         // 提交进度
         const submitProgress = async () => {
+          // 前端表单严格拦截空值，避免手机浏览器漏选章节导致空白
+          if (!formData.value.college) {
+            alert("⚠️ 请选择所属学院！");
+            return;
+          }
+          if (!formData.value.major) {
+            alert("⚠️ 请选择具体专业或招生大类！");
+            return;
+          }
+          if (!formData.value.course_type) {
+            alert("⚠️ 请选择课程体系！");
+            return;
+          }
+          if (!formData.value.chapter || !formData.value.chapter.trim()) {
+            alert("⚠️ 请选择当前实际上到的【章节】！");
+            return;
+          }
+          if (!formData.value.section || !formData.value.section.trim()) {
+            alert("⚠️ 请选择具体【小节】！");
+            return;
+          }
+          if (!formData.value.reporter || !formData.value.reporter.trim()) {
+            alert("⚠️ 请输入您的昵称或社员名！");
+            return;
+          }
+
           submitting.value = true;
           try {
             const { error } = await supabaseClient.from('math_progress').insert([formData.value]);
